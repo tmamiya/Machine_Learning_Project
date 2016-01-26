@@ -29,14 +29,10 @@ head(training)
 str(training)
 ncol(training)
 nrow(training)
+colSums(is.na(training))
 whatis(training) #theres a lot of variables with all N/A's, cvtd_timestamp has a lot of distinct values for a factor
 unique(training$cvtd_timestamp) #ok this is ok
 ##featurePlot(x=training, y = training$classe, plot = "pairs")
-```
-
-#Cleaning
-```{r}
-
 ```
 
 #Data Slicing
@@ -46,6 +42,22 @@ inTrain <- createDataPartition(y=training$classe, p = .75, list = FALSE)
 training<-training[inTrain,]; testing<-training[-inTrain,]
 dim(training); dim(testing)
 ```
+
+#Cleaning NA's and Near Zero Variances
+```{r}
+x = nearZeroVar(training, saveMetrics = TRUE)
+str(x, vec.len=2)
+x[x[,"zeroVar"] > 0, ]
+x[x[,"zeroVar"] + x[,"nzv"] > 0, ]
+
+naColumnVector<- c()
+for (i in 1:ncol(training))
+        if(sum(is.na(training[,i]))/nrow(training)>=.8)
+                naColumnVector<-append(naColumnVector,i)
+training <- training[,-(naColumnVector)]
+```
+
+
 
 #Training options
 ```{r}
