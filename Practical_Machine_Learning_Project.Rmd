@@ -18,13 +18,16 @@ library(RANN);library(rattle); library(caret); library(randomForest); library(rp
 ```{r}
 trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
-training <- read.csv(url(trainUrl),na.strings=c("NA","#DIV/0!","","-","?"))
-testing <- read.csv(url(testUrl),na.strings=c("NA","#DIV/0!","","-","?"))
+training_upload <- read.csv(url(trainUrl),na.strings=c("NA","#DIV/0!","","-","?"))  #load it so don't have to continue to download
+testing_upload <- read.csv(url(testUrl),na.strings=c("NA","#DIV/0!","","-","?"))
+
+training <- training_upload
+testing <- testing_upload
 ```
 
 
 ```{r}
-#Explore
+#Explore Code Not used for final output
 head(training)
 str(training)
 ncol(training)
@@ -32,61 +35,92 @@ nrow(training)
 colSums(is.na(training))
 whatis(training) #theres a lot of variables with all N/A's, cvtd_timestamp has a lot of distinct values for a factor
 unique(training$cvtd_timestamp) #ok this is ok
+unique(training$x) #need to take this out its just an ID
+unique(training$num_window) #Sequential info not helpful
 ##featurePlot(x=training, y = training$classe, plot = "pairs") DONT DO THIS AGAIN TOO MANY VARIABLES
 
 #Near Zero Variance Explore
 x = nearZeroVar(training, saveMetrics = TRUE)
+x$rownumber <- 1:nrow(x)  #ADDS rownumbers to nearZeroVar info
 str(x, vec.len=2)
 x[x[,"zeroVar"] > 0, ] #variables with only zero var  x[] with x[,"zeroVar"] > 0 or true
 x[x[,"zeroVar"] + x[,"nzv"] > 0, ]
 
+#PCA explore
+M<-abs(cor(training[,-c(2,5,59)]))  ##Remove factor variables, keep only numeric, gives a matrix with correlations
+diag(M) <- 0
+which(M>.8,arr.ind = T)
+#names(training)[c(12,15)]
+#plot(training[,12],training[,15])
+whatis(M)
+M
 ```
-
-#Data Slicing
-Splitting Training Data into training and testing, on outcome classe
-```{r}
-inTrain <- createDataPartition(y=training$classe, p = .75, list = FALSE)
-training<-training[inTrain,]; testing<-training[-inTrain,]
-dim(training); dim(testing)
-```
-
-#Cleaning NA's and Near Zero Variances
-```{r}
-
-naColumnVector<- c()
-for (i in 1:ncol(training))
-        if(sum(is.na(training[,i]))/nrow(training)>=.8|x[i,"zeroVar"]+ x[2,"nzv"] > 0)
-                naColumnVector<-append(naColumnVector,i)
-training <- training[,-(naColumnVector)]
-```
-
-
 
 #Training options
 ```{r}
 args(trainControl)
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
 ```
 
 
+#Data Slicing
+Splitting Training Data into training and testing, on outcome classe
 ```{r}
+inTrain <- createDataPartition(y=training$classe, p = .60, list = FALSE)
+training<-training[inTrain,]; testing<-training[-inTrain,]
+dim(training); dim(testing)
+```
+
+#Cleaning NA's, Near Zero Variances, unusable data
+```{r}
+x = nearZeroVar(training, saveMetrics = TRUE) #SETUP nearzero info
+naColumnVector<- c()
+for (i in 1:ncol(training))
+        if(sum(is.na(training[,i]))/nrow(training)>=.55|x[i,"zeroVar"]+ x[i,"nzv"] > 0)  ##IF 80% of rows NA or is Near Zero Var   
+                naColumnVector<-append(naColumnVector,i)  ##Add to list of variables to delete
+naColumnVector <- append (naColumnVector,1)  # add x variable which is just an ID variable
+naColumnVector <- append (naColumnVector,7)  # add num_window variable which is sequential
+naColumnVector <- append (naColumnVector,3:5)  # add timestamp variables, wont help predictions
+
+training <- training[,-(naColumnVector)]  ##delete variables
+testing <- testing[,-(naColumnVector)]  ##do the same for the testing data set
+```
+
+
+#Parallel Processing to run Models
+```{r}
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           allowParallel = TRUE)
+```
+
+#Predicting with Random Forest
+```{r}
+modelFitA<- train(training$classe ~ ., method = "rf", preProcess = "pca", data = training,trControl = fitControl)
+modelFitA
+predA <- predict(modelFitA, testing); testing$predRightA <- predA==testing$classe
+table(predA,testing$classe)
+```
+
+#Predicting with Decision Tree
+```{r}
+#PreProcess with principle components analysis
+#preProc<-preProcess(log10(training[,-c(2,5,59)]+1),method="pca",pcaComp = 2)
+#trainPC<-predict(preProc,log10(training))
+
+modFit<-rpart(classe ~ ., data=training, method="class")
+fancyRpartPlot(modFit)
+predictionB <- predict(modFit, testing, type = "class")
+confusionMatrix(predictionB, testing$classe)
 
 ```
 
+#Stopping Parallel Processing
 ```{r}
-
+stopCluster(cluster)
 ```
 
 ```{r}
