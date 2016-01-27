@@ -4,65 +4,71 @@ output: html_document
 ---
 
 ##How the model was built
+Model was chosen/built to maximize prediction accuracy for the outcome variable "classe"" using 54 predictor variables.  There were 160 variables in the original data set, 106 variables proved to not having any meaningful data (predominately null), had near zero variance, or did not give any more signal of future predictions ie. ID variables, time_stamps (introduced in data accumulation).
 
-##cross validation
+##Cross Validation
+Within the study design, we have randomly split 40% of the training set's data for testing.  The model will be built with the rest of the training set's data set and tested on the testing data.  We will repeat model building and testing until we find the most accurate model, we than will test using the untouched test data.
 
-##expected out of sample error is
+##Expected Out of Sample Error
+Expected out of sample error should be higher (worse) than the accuracy from the cross-validation data. In this case the highest accuracy we received from the cross-validation data was 100%.  Out of sample error actualized at an accuracy of 95% when we eventually predicted the test data.
 
-#Load Libraries
-```{r}
-library(RANN);library(rattle); library(caret); library(randomForest); library(rpart); library(rpart.plot); library(YaleToolkit)
+##Load Libraries
+```{r,warning=FALSE,results='hide',include=FALSE}
+library(RANN);library(rattle); library(caret); library(randomForest); library(rpart); library(rpart.plot); library(YaleToolkit);library(AppliedPredictiveModeling);library(ElemStatLearn); library (pgmm); library(lubridate); library(forecast)
+
+
 ```
 
-#Pull Data
+##Pull Data
 ```{r}
 trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
 testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
-training_upload <- read.csv(url(trainUrl),na.strings=c("NA","#DIV/0!","","-","?"))  #load it so don't have to continue to download
-testing_upload <- read.csv(url(testUrl),na.strings=c("NA","#DIV/0!","","-","?"))
+training_download <- read.csv(url(trainUrl),na.strings=c("NA","#DIV/0!","","-","?"))  #load it so don't have to continue to download
+testing_download <- read.csv(url(testUrl),na.strings=c("NA","#DIV/0!","","-","?"))
 
-training <- training_upload
-testing <- testing_upload
+training <- training_download
+testing_final <- testing_download
 ```
 
 
-```{r}
+```{r,warning=FALSE,results='hide',include=FALSE}
+percent <- function(x, digits = 2, format = "f", ...) {
+  paste0(formatC(100 * x, format = format, digits = digits, ...), "%")}
+
 #Explore Code Not used for final output
 head(training)
 str(training)
 ncol(training)
 nrow(training)
 colSums(is.na(training))
-whatis(training) #theres a lot of variables with all N/A's, cvtd_timestamp has a lot of distinct values for a factor
+whatis(testing_final) #theres a lot of variables with all N/A's, cvtd_timestamp has a lot of distinct values for a factor
 unique(training$cvtd_timestamp) #ok this is ok
 unique(training$x) #need to take this out its just an ID
 unique(training$num_window) #Sequential info not helpful
 ##featurePlot(x=training, y = training$classe, plot = "pairs") DONT DO THIS AGAIN TOO MANY VARIABLES
 
 #Near Zero Variance Explore
-x = nearZeroVar(training, saveMetrics = TRUE)
-x$rownumber <- 1:nrow(x)  #ADDS rownumbers to nearZeroVar info
-str(x, vec.len=2)
-x[x[,"zeroVar"] > 0, ] #variables with only zero var  x[] with x[,"zeroVar"] > 0 or true
-x[x[,"zeroVar"] + x[,"nzv"] > 0, ]
+#x = nearZeroVar(training, saveMetrics = TRUE)
+#x$rownumber <- 1:nrow(x)  #ADDS rownumbers to nearZeroVar info
+#str(x, vec.len=2)
+#x[x[,"zeroVar"] > 0, ] #variables with only zero var  x[] with x[,"zeroVar"] > 0 or true
+#x[x[,"zeroVar"] + x[,"nzv"] > 0, ]
 
 #PCA explore
-M<-abs(cor(training[,-c(2,5,59)]))  ##Remove factor variables, keep only numeric, gives a matrix with correlations
-diag(M) <- 0
-which(M>.8,arr.ind = T)
+#M<-abs(cor(training[,-c(2,5,59)]))  ##Remove factor variables, keep only numeric, gives a matrix with correlations
+#diag(M) <- 0
+#which(M>.8,arr.ind = T)
 #names(training)[c(12,15)]
 #plot(training[,12],training[,15])
-whatis(M)
-M
+#whatis(M)
+#M
+
+##DIfferent methods models you can use  
+names(getModelInfo())
+
 ```
 
-#Training options
-```{r}
-args(trainControl)
-```
-
-
-#Data Slicing
+##Data Slicing
 Splitting Training Data into training and testing, on outcome classe
 ```{r}
 inTrain <- createDataPartition(y=training$classe, p = .60, list = FALSE)
@@ -70,7 +76,7 @@ training<-training[inTrain,]; testing<-training[-inTrain,]
 dim(training); dim(testing)
 ```
 
-#Cleaning NA's, Near Zero Variances, unusable data
+##Cleaning NA's, Near Zero Variances, unusable data
 ```{r}
 x = nearZeroVar(training, saveMetrics = TRUE) #SETUP nearzero info
 naColumnVector<- c()
@@ -83,11 +89,12 @@ naColumnVector <- append (naColumnVector,3:5)  # add timestamp variables, wont h
 
 training <- training[,-(naColumnVector)]  ##delete variables
 testing <- testing[,-(naColumnVector)]  ##do the same for the testing data set
+testing_final <- testing_final[,-(naColumnVector)] ##do the same for the out of sample testing data set
 ```
 
 
-#Parallel Processing to run Models
-```{r}
+##Parallel Processing to run Models
+```{r,warning=FALSE}
 library(parallel)
 library(doParallel)
 cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
@@ -97,248 +104,79 @@ fitControl <- trainControl(method = "cv",
                            allowParallel = TRUE)
 ```
 
-#Predicting with Random Forest
-```{r}
+##Predicting with Random Forest
+```{r,warning=FALSE}
 modelFitA<- train(training$classe ~ ., method = "rf", preProcess = "pca", data = training,trControl = fitControl)
 modelFitA
-predA <- predict(modelFitA, testing); testing$predRightA <- predA==testing$classe
-table(predA,testing$classe)
+predA <- predict(modelFitA, testing) #; testing$predRightA <- predA==testing$classe
+RFresults<-confusionMatrix(predA, testing$classe)
+RFresults
+#RFresults$overall[1]
+#table(predA,testing$classe)
 ```
+Random Forest model Accuracy `r percent(RFresults$overall[1])`
 
-#Predicting with Decision Tree
-```{r}
+##Predicting with Decision Tree
+```{r,warning=FALSE}
 #PreProcess with principle components analysis
 #preProc<-preProcess(log10(training[,-c(2,5,59)]+1),method="pca",pcaComp = 2)
 #trainPC<-predict(preProc,log10(training))
 
-modFit<-rpart(classe ~ ., data=training, method="class")
-fancyRpartPlot(modFit)
-predictionB <- predict(modFit, testing, type = "class")
-confusionMatrix(predictionB, testing$classe)
+modFitB<-rpart(classe ~ ., data=training, method="class")
+fancyRpartPlot(modFitB)
+predB <- predict(modFitB, testing, type = "class")
+DTresults<-confusionMatrix(predB, testing$classe)
+DTresults
+```
+Decision Tree model Accuracy `r percent(DTresults$overall[1])`
 
+##Predicting with Bagging
+```{r,warning=FALSE}
+modelFitC<- train(training$classe ~ ., method = "treebag", preProcess = "pca", data = training,trControl = fitControl)
+modelFitC
+predC <- predict(modelFitC, testing)#; testing$predRightC <- predC==testing$classe
+#table(predC,testing$classe)
+BAresults<-confusionMatrix(predC, testing$classe)
+BAresults
+```
+Bagging model Accuracy `r percent(BAresults$overall[1])`
+
+##Predicting with Boosting
+```{r,warning=FALSE}
+modelFitD<- train(training$classe ~ ., method = "gbm", preProcess = "pca", data = training,trControl = fitControl)
+modelFitD
+predD <- predict(modelFitD, testing)#; testing$predRightD <- predD==testing$classe
+#table(predD,testing$classe)
+BOresults<-confusionMatrix(predD, testing$classe)
+BOresults
+```
+Boosting model Accuracy `r percent(BOresults$overall[1])`
+
+```{r,include=FALSE}
+##Predicting with Model based approach
+modlda<- train(training$classe ~ ., method = "lda", preProcess = "pca", data = training,trControl = fitControl)
+modnb = train(training$classe ~ .,data = training, method="nb",trControl = fitControl)   #Naive Bayes
+plda = predict(modlda,testing); pnb = predict (modnb,testing)
+table(plda,pnb)
+#predE <- predict(modelFitE, testing)#; testing$predRightE <- predE==testing$classe
+#table(predE,testing$classe)
+#confusionMatrix(predE, testing$classe)
 ```
 
-#Stopping Parallel Processing
-```{r}
+
+```{r,include=FALSE}
+##Stopping Parallel Processing
 stopCluster(cluster)
 ```
+##Model Selection
 
-```{r}
-
+Random Forest yielded the Best Results.  We will use that to predict for the testing data.
+```{r,warning=FALSE}
+predfinal <- predict(modelFitA, testing_final)
+predfinalDF<-levels(predfinal)[predfinal]  #convert factor to character
+predfinalDF<-as.data.frame(predfinalDF)  #convert character to data frame
+predfinalDF #print out predictions      
 ```
+##Conclusion
 
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
+Random Forest predictions proved to be very accurate with 95% of the predictions being correct on the out of sample data.
